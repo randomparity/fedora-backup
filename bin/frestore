@@ -16,6 +16,13 @@ EFI_DIR=""
 
 # Populated by load_config; declared here so shellcheck tracks them as globals.
 BACKUP_DEV="" BACKUP_MNT="" HOSTNAME_TAG=""
+mounted_backup=0
+
+# cleanup : unmount the backup target only if this run mounted it.
+cleanup() {
+  [[ "$mounted_backup" == "1" ]] && { run umount "$BACKUP_MNT" || true; }
+  return 0
+}
 
 usage() {
   cat <<'EOF'
@@ -42,47 +49,47 @@ main() {
   export DRY_RUN=1
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --help | -h)
-        usage
-        return 0
-        ;;
-      --apply)
-        export DRY_RUN=0
-        shift
-        ;;
-      --snapshot)
-        SNAPSHOT="${2:-}"
-        shift 2
-        ;;
-      --snapshot=*)
-        SNAPSHOT="${1#--snapshot=}"
-        shift
-        ;;
-      --boot-dir)
-        BOOT_DIR="${2:-}"
-        shift 2
-        ;;
-      --boot-dir=*)
-        BOOT_DIR="${1#--boot-dir=}"
-        shift
-        ;;
-      --efi-dir)
-        EFI_DIR="${2:-}"
-        shift 2
-        ;;
-      --efi-dir=*)
-        EFI_DIR="${1#--efi-dir=}"
-        shift
-        ;;
-      --config)
-        CONFIG="${2:-}"
-        shift 2
-        ;;
-      --config=*)
-        CONFIG="${1#--config=}"
-        shift
-        ;;
-      *) die "unknown argument: $1" ;;
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --apply)
+      export DRY_RUN=0
+      shift
+      ;;
+    --snapshot)
+      SNAPSHOT="${2:-}"
+      shift 2
+      ;;
+    --snapshot=*)
+      SNAPSHOT="${1#--snapshot=}"
+      shift
+      ;;
+    --boot-dir)
+      BOOT_DIR="${2:-}"
+      shift 2
+      ;;
+    --boot-dir=*)
+      BOOT_DIR="${1#--boot-dir=}"
+      shift
+      ;;
+    --efi-dir)
+      EFI_DIR="${2:-}"
+      shift 2
+      ;;
+    --efi-dir=*)
+      EFI_DIR="${1#--efi-dir=}"
+      shift
+      ;;
+    --config)
+      CONFIG="${2:-}"
+      shift 2
+      ;;
+    --config=*)
+      CONFIG="${1#--config=}"
+      shift
+      ;;
+    *) die "unknown argument: $1" ;;
     esac
   done
 
@@ -96,7 +103,21 @@ main() {
   ts="${SNAPSHOT#root.}"
 
   run mkdir -p "$BACKUP_MNT" "$DEST_TOPLEVEL"
-  run mount "$BACKUP_DEV" "$BACKUP_MNT"
+  trap cleanup EXIT
+  if ! findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1; then
+    run mount "$BACKUP_DEV" "$BACKUP_MNT"
+    mounted_backup=1
+  fi
+
+  for subvol in "${SUBVOLS[@]}"; do
+    snap="$subvol.$ts"
+    if [[ -e "$DEST_TOPLEVEL/$subvol" ]]; then
+      die "destination already has a subvolume named '$subvol' at $DEST_TOPLEVEL; refusing to overwrite (clean the target first)"
+    fi
+    if [[ -e "$DEST_TOPLEVEL/$snap" ]]; then
+      die "destination already has '$snap' at $DEST_TOPLEVEL (leftover from a previous run?); remove it first"
+    fi
+  done
 
   for subvol in "${SUBVOLS[@]}"; do
     snap="$subvol.$ts"
@@ -122,8 +143,6 @@ main() {
     printf '  tar --xattrs --acls -xpf %s -C <recovery-efi-mount>\n' \
       "$base/boot/efi.$ts.tar.zst" >&2
   fi
-
-  run umount "$BACKUP_MNT"
 
   cat >&2 <<EOF
 
