@@ -2,3 +2,5 @@ etc/backup.conf
 *.tar.zst
 .DS_Store
 .worktrees/
+# Local planning artifacts (superpowers); intentionally untracked. See CLAUDE.md.
+docs/superpowers/plans/
