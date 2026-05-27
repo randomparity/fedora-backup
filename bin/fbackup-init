@@ -10,6 +10,9 @@ source "$REPO_DIR/lib/backup_target.sh"
 
 CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
 
+# Populated by load_config; declared here so shellcheck tracks them as globals.
+BACKUP_DEV="" BACKUP_MNT="" BACKUP_LABEL="" HOSTNAME_TAG=""
+
 usage() {
   cat <<'EOF'
 Usage: fbackup-init [--config PATH] [--dry-run]
@@ -18,6 +21,11 @@ One-time preparation of the USB backup target. Formats BACKUP_DEV as btrfs with
 label BACKUP_LABEL and creates the directory layout. Refuses to wipe a device
 that already holds a filesystem unless FORCE=1 is set in the environment.
 EOF
+}
+
+cleanup() {
+  findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1 && { run umount "$BACKUP_MNT" || true; }
+  return 0
 }
 
 main() {
@@ -50,10 +58,12 @@ main() {
 
   run mkdir -p "$BACKUP_MNT"
   run mount "$BACKUP_DEV" "$BACKUP_MNT"
-  local base="$BACKUP_MNT/$HOSTNAME_TAG"
-  run mkdir -p "$base/subvols/root" "$base/subvols/home" \
-    "$base/boot" "$base/manifests"
-  run umount "$BACKUP_MNT"
+  trap cleanup EXIT
+  local base="$BACKUP_MNT/$HOSTNAME_TAG" subvol
+  run mkdir -p "$base/boot" "$base/manifests"
+  for subvol in "${SUBVOLS[@]}"; do
+    run mkdir -p "$base/subvols/$subvol"
+  done
   log_info "Backup target ready: $BACKUP_LABEL at $BACKUP_DEV"
 }
 
