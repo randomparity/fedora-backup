@@ -24,15 +24,17 @@ select_parent() {
     tail -n1
 }
 
-# prune_candidates <keep_n> <list>
+# prune_candidates <keep_n> <list> [protect]
 # list = newline-separated basenames. Prints regular snapshots to delete
-# (everything older than the newest keep_n), oldest first. Never preupgrade.
+# (everything older than the newest keep_n), oldest first. Never preupgrade,
+# and never the optional <protect> name (the common incremental parent).
 prune_candidates() {
-  local keep="$1" list="$2"
+  local keep="$1" list="$2" protect="${3:-}"
   printf '%s\n' "$list" |
     grep -E '^[^.]+\.[0-9]{8}T[0-9]{6}Z$' |
     sort -r |
     tail -n "+$((keep + 1))" |
+    { if [[ -n "$protect" ]]; then grep -vxF "$protect"; else cat; fi; } |
     sort
 }
 

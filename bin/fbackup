@@ -72,11 +72,11 @@ archive_boot() {
 }
 
 prune_side() {
-  local dir="$1" subvol="$2" del
+  local dir="$1" subvol="$2" protect="$3" del
   while IFS= read -r del; do
     [[ -z "$del" ]] && continue
     run btrfs subvolume delete "$dir/$del"
-  done < <(prune_candidates "$RETENTION_KEEP" "$(list_snaps "$dir" "$subvol")")
+  done < <(prune_candidates "$RETENTION_KEEP" "$(list_snaps "$dir" "$subvol")" "$protect")
 }
 
 # cleanup : unmount what we mounted, on success or failure. Idempotent.
@@ -149,9 +149,13 @@ main() {
   fi
 
   if [[ -z "$PREUPGRADE_TAG" ]]; then
+    local common_parent
     for subvol in "${SUBVOLS[@]}"; do
-      prune_side "$snapshots_dir" "$subvol"
-      prune_side "$target_base/subvols/$subvol" "$subvol"
+      common_parent="$(select_parent "$subvol" \
+        "$(list_snaps "$snapshots_dir" "$subvol")" \
+        "$(list_snaps "$target_base/subvols/$subvol" "$subvol")")"
+      prune_side "$snapshots_dir" "$subvol" "$common_parent"
+      prune_side "$target_base/subvols/$subvol" "$subvol" "$common_parent"
     done
   fi
 
