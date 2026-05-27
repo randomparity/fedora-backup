@@ -20,3 +20,9 @@ restore_receive() {
 restore_boot() {
   run tar --xattrs --acls -xpf "$1" -C "$2"
 }
+
+# restore_canonicalize <dest_toplevel> <snap_name> <subvol>
+# Create a writable canonical subvolume from the received read-only snapshot.
+restore_canonicalize() {
+  run btrfs subvolume snapshot "$1/$2" "$1/$3"
+}

@@ -29,3 +29,10 @@ teardown() { teardown_stubs; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"[DRY-RUN] btrfs send /t/sub/snap | btrfs receive /dest"* ]]
 }
+
+@test "restore_canonicalize creates a writable subvol from the received snapshot" {
+  make_stub btrfs
+  run restore_canonicalize /mnt/restore-target root.20260527T143000Z root
+  [ "$status" -eq 0 ]
+  grep -q "btrfs subvolume snapshot /mnt/restore-target/root.20260527T143000Z /mnt/restore-target/root" "$STUB_LOG"
+}
