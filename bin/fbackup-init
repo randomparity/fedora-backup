@@ -32,12 +32,12 @@ main() {
   local arg
   for arg in "$@"; do
     case "$arg" in
-      --help | -h)
-        usage
-        return 0
-        ;;
-      --dry-run) export DRY_RUN=1 ;;
-      --config=*) CONFIG="${arg#--config=}" ;;
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --dry-run) export DRY_RUN=1 ;;
+    --config=*) CONFIG="${arg#--config=}" ;;
     esac
   done
 

@@ -34,48 +34,48 @@ main() {
   shift || true
   for arg in "$@"; do
     case "$arg" in
-      --dry-run) export DRY_RUN=1 ;;
-      --config=*) CONFIG="${arg#--config=}" ;;
+    --dry-run) export DRY_RUN=1 ;;
+    --config=*) CONFIG="${arg#--config=}" ;;
     esac
   done
 
   case "$sub" in
-    --help | -h | "")
-      usage
-      return 0
-      ;;
-    preflight)
-      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
-      load_config "$CONFIG"
-      run mount "$BACKUP_DEV" "$BACKUP_MNT" 2>/dev/null || true
-      up_preflight "$BACKUP_MNT" "$HOSTNAME_TAG"
-      run umount "$BACKUP_MNT" 2>/dev/null || true
-      run dnf5 check
-      ;;
-    refresh)
-      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
-      up_refresh
-      log_info "If the kernel changed, reboot before continuing."
-      ;;
-    snapshot)
-      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
-      FBACKUP_CONFIG="$CONFIG" "$SCRIPT_DIR/fsnapshot-preupgrade"
-      ;;
-    download)
-      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
-      up_download "$TARGET_RELEASE"
-      ;;
-    apply)
-      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
-      up_apply
-      ;;
-    post)
-      up_post
-      log_info "Verify: cat /etc/os-release (VERSION_ID=$TARGET_RELEASE), uname -r, desktop session."
-      ;;
-    *)
-      die "unknown subcommand: $sub (see --help)"
-      ;;
+  --help | -h | "")
+    usage
+    return 0
+    ;;
+  preflight)
+    [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+    load_config "$CONFIG"
+    run mount "$BACKUP_DEV" "$BACKUP_MNT" 2>/dev/null || true
+    up_preflight "$BACKUP_MNT" "$HOSTNAME_TAG"
+    run umount "$BACKUP_MNT" 2>/dev/null || true
+    run dnf5 check
+    ;;
+  refresh)
+    [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+    up_refresh
+    log_info "If the kernel changed, reboot before continuing."
+    ;;
+  snapshot)
+    [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+    FBACKUP_CONFIG="$CONFIG" "$SCRIPT_DIR/fsnapshot-preupgrade"
+    ;;
+  download)
+    [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+    up_download "$TARGET_RELEASE"
+    ;;
+  apply)
+    [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+    up_apply
+    ;;
+  post)
+    up_post
+    log_info "Verify: cat /etc/os-release (VERSION_ID=$TARGET_RELEASE), uname -r, desktop session."
+    ;;
+  *)
+    die "unknown subcommand: $sub (see --help)"
+    ;;
   esac
 }
 

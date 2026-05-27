@@ -133,8 +133,15 @@ main() {
     mounted_backup=1
   fi
 
-  [[ -d "$target_base/subvols" ]] ||
-    die "backup target not initialized at $target_base; run fbackup-init first"
+  if [[ ! -d "$target_base/subvols" ]]; then
+    # A dry run only prints the mount, so an initialized-but-unmounted target
+    # looks uninitialized here. Warn and keep previewing instead of dying.
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+      log_warn "backup target not initialized/mounted at $target_base; dry-run shows the plan only (run fbackup-init, then a real backup)"
+    else
+      die "backup target not initialized at $target_base; run fbackup-init first"
+    fi
+  fi
 
   local root_src
   root_src="$(findmnt -no SOURCE / | sed 's/\[.*\]//')"

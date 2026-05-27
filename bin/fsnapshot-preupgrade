@@ -23,15 +23,15 @@ main() {
   local passthru=() arg
   for arg in "$@"; do
     case "$arg" in
-      --help | -h)
-        usage
-        return 0
-        ;;
-      --dry-run)
-        export DRY_RUN=1
-        passthru+=("$arg")
-        ;;
-      *) passthru+=("$arg") ;;
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --dry-run)
+      export DRY_RUN=1
+      passthru+=("$arg")
+      ;;
+    *) passthru+=("$arg") ;;
     esac
   done
 
