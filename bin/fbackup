@@ -12,6 +12,8 @@ source "$REPO_DIR/lib/manifest.sh"
 
 CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
 PREUPGRADE_TAG=""
+mounted_backup=0
+mounted_src=0
 
 usage() {
   cat <<'EOF'
@@ -88,8 +90,8 @@ prune_side() {
 
 # cleanup : unmount what we mounted, on success or failure. Idempotent.
 cleanup() {
-  findmnt -rno TARGET "$SRC_TOPLEVEL_MNT" >/dev/null 2>&1 && { run umount "$SRC_TOPLEVEL_MNT" || true; }
-  findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1 && { run umount "$BACKUP_MNT" || true; }
+  [[ "$mounted_src" == "1" ]] && { run umount "$SRC_TOPLEVEL_MNT" || true; }
+  [[ "$mounted_backup" == "1" ]] && { run umount "$BACKUP_MNT" || true; }
   return 0
 }
 
@@ -97,14 +99,14 @@ main() {
   local force_full=0 arg
   for arg in "$@"; do
     case "$arg" in
-      --help | -h)
-        usage
-        return 0
-        ;;
-      --dry-run) export DRY_RUN=1 ;;
-      --preupgrade) PREUPGRADE_TAG="preupgrade-f43" ;;
-      --full) force_full=1 ;;
-      --config=*) CONFIG="${arg#--config=}" ;;
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --dry-run) export DRY_RUN=1 ;;
+    --preupgrade) PREUPGRADE_TAG="preupgrade-f43" ;;
+    --full) force_full=1 ;;
+    --config=*) CONFIG="${arg#--config=}" ;;
     esac
   done
 
@@ -118,15 +120,20 @@ main() {
 
   run mkdir -p "$SRC_TOPLEVEL_MNT" "$BACKUP_MNT"
   trap cleanup EXIT
-  findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1 || run mount "$BACKUP_DEV" "$BACKUP_MNT"
+  if ! findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1; then
+    run mount "$BACKUP_DEV" "$BACKUP_MNT"
+    mounted_backup=1
+  fi
 
   [[ -d "$target_base/subvols" ]] ||
     die "backup target not initialized at $target_base; run fbackup-init first"
 
   local root_src
   root_src="$(findmnt -no SOURCE / | sed 's/\[.*\]//')"
-  findmnt -rno TARGET "$SRC_TOPLEVEL_MNT" >/dev/null 2>&1 ||
+  if ! findmnt -rno TARGET "$SRC_TOPLEVEL_MNT" >/dev/null 2>&1; then
     run mount -o subvolid=5 "$root_src" "$SRC_TOPLEVEL_MNT"
+    mounted_src=1
+  fi
   run mkdir -p "$snapshots_dir"
 
   local subvol parent parents=()
