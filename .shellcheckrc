@@ -1,2 +1,4 @@
 # Follow sourced files for cross-file checks.
 external-sources=true
+# Resolve source= directives relative to the script being checked.
+source-path=SCRIPTDIR

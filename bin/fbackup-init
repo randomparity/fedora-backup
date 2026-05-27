@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=../lib/common.sh
+source "$REPO_DIR/lib/common.sh"
+# shellcheck source=../lib/backup_target.sh
+source "$REPO_DIR/lib/backup_target.sh"
+
+CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
+
+usage() {
+  cat <<'EOF'
+Usage: fbackup-init [--config PATH] [--dry-run]
+
+One-time preparation of the USB backup target. Formats BACKUP_DEV as btrfs with
+label BACKUP_LABEL and creates the directory layout. Refuses to wipe a device
+that already holds a filesystem unless FORCE=1 is set in the environment.
+EOF
+}
+
+main() {
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --help | -h)
+        usage
+        return 0
+        ;;
+      --dry-run) export DRY_RUN=1 ;;
+      --config=*) CONFIG="${arg#--config=}" ;;
+    esac
+  done
+
+  require_root
+  load_config "$CONFIG"
+
+  [[ -b "$BACKUP_DEV" ]] || die "backup device is not a block device: $BACKUP_DEV"
+
+  log_info "Target device:"
+  lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$BACKUP_DEV" >&2 || true
+  target_guard "$BACKUP_DEV"
+
+  if ! confirm_phrase "FORMAT" "This ERASES $BACKUP_DEV. Type 'FORMAT' to proceed: "; then
+    die "aborted by user"
+  fi
+
+  target_format "$BACKUP_DEV" "$BACKUP_LABEL"
+
+  run mkdir -p "$BACKUP_MNT"
+  run mount "$BACKUP_DEV" "$BACKUP_MNT"
+  local base="$BACKUP_MNT/$HOSTNAME_TAG"
+  run mkdir -p "$base/subvols/root" "$base/subvols/home" \
+    "$base/boot" "$base/manifests"
+  run umount "$BACKUP_MNT"
+  log_info "Backup target ready: $BACKUP_LABEL at $BACKUP_DEV"
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
