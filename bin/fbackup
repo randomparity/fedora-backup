@@ -106,8 +106,6 @@ main() {
 
   local ts snapshots_dir target_base
   ts="$(snap_timestamp)"
-  # shellcheck disable=SC2153  # SNAP_DIR comes from load_config; the lowercase
-  # match is the unrelated 'snap_dir' local in the sourced lib/snapshots.sh.
   snapshots_dir="$SRC_TOPLEVEL_MNT/$SNAP_DIR"
   target_base="$BACKUP_MNT/$HOSTNAME_TAG"
 
