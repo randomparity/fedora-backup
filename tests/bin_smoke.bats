@@ -88,6 +88,37 @@ EOF
   [[ "$output" == *"[DRY-RUN]"* ]]
 }
 
+@test "fsnapshot-preupgrade --dry-run does not write the local stash" {
+  load helpers/stubs
+  setup_stubs
+  # Stub everything EXCEPT mkdir, so that without the fix a real mkdir would
+  # create the stash dir (the bug), and with the fix DRY_RUN skips it.
+  for c in tar findmnt btrfs mount umount sync rpm zstd; do make_stub "$c"; done
+  stash="$STUB_DIR/stash"
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  mkdir -p "$STUB_DIR/backup/host/subvols/root" "$STUB_DIR/backup/host/subvols/home" "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
+  run env FBACKUP_CONFIG="$cfg" LOCAL_BOOT_STASH="$stash" SKIP_ROOT_CHECK=1 bin/fsnapshot-preupgrade --dry-run
+  # Check before teardown_stubs removes STUB_DIR (which would hide the bug).
+  local stash_created=0
+  [ -d "$stash" ] && stash_created=1
+  teardown_stubs
+  [ "$status" -eq 0 ]
+  [ "$stash_created" -eq 0 ]
+  [[ "$output" == *"[DRY-RUN]"* ]]
+}
+
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs
