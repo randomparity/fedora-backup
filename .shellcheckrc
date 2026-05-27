@@ -1,0 +1,2 @@
+# Follow sourced files for cross-file checks.
+external-sources=true

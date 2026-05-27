@@ -1,0 +1,21 @@
+repos:
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
+        args: [-x]
+      - id: shfmt
+        name: shfmt
+        entry: shfmt
+        language: system
+        types: [shell]
+        args: [-i, "2", -ci, -d]
+      - id: bats
+        name: bats
+        entry: bash -c 'bats tests/ --filter-tags !integration || bats tests/*.bats'
+        language: system
+        pass_filenames: false
+        files: '\.(bats|sh|bash)$|^bin/'

@@ -1,0 +1,25 @@
+# Copy to etc/backup.conf and adjust. etc/backup.conf is gitignored.
+
+# Backup USB target, addressed by stable by-id path (never /dev/sdX).
+BACKUP_DEV="/dev/disk/by-id/usb-SanDisk_PRO-G40_32343335334D383031333039-0:0"
+BACKUP_LABEL="fedora-backup"
+BACKUP_MNT="/mnt/backup"
+
+# Source btrfs top level (subvolid=5) gets mounted here during a run.
+SRC_TOPLEVEL_MNT="/mnt/btrfs-root"
+
+# Subvolumes to back up (names under the top level).
+SUBVOLS=(root home)
+
+# Local read-only snapshots are kept here (directory under the top level).
+SNAP_DIR="_snapshots"
+
+# Non-btrfs boot partitions, captured as tarballs.
+BOOT_MNT="/boot"
+EFI_MNT="/boot/efi"
+
+# How many regular snapshot sets to keep on each side (preupgrade exempt).
+RETENTION_KEEP=3
+
+# Tag used in the target directory path; defaults to hostname if empty.
+HOSTNAME_TAG=""
