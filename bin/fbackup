@@ -63,12 +63,19 @@ run_zstd_to() {
   zstd -q -o "$1"
 }
 
+archive_one() {
+  local src="$1" out="$2"
+  if run tar --xattrs --acls -C "$src" -cpf - . | run_zstd_to "$out"; then
+    return 0
+  fi
+  run rm -f "$out"
+  die "boot archive failed for $src (removed partial $out)"
+}
+
 archive_boot() {
   local target_base="$1" ts="$2"
-  run tar --xattrs --acls -C "$BOOT_MNT" -cpf - . |
-    run_zstd_to "$target_base/boot/boot.$ts.tar.zst"
-  run tar --xattrs --acls -C "$EFI_MNT" -cpf - . |
-    run_zstd_to "$target_base/boot/efi.$ts.tar.zst"
+  archive_one "$BOOT_MNT" "$target_base/boot/boot.$ts.tar.zst"
+  archive_one "$EFI_MNT" "$target_base/boot/efi.$ts.tar.zst"
 }
 
 prune_side() {
