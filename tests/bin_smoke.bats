@@ -138,7 +138,7 @@ RETENTION_KEEP=3
 HOSTNAME_TAG=host
 EOF
   mkdir -p "$STUB_DIR/backup/host/subvols/root" "$STUB_DIR/backup/host/subvols/home" "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
-  run env FBACKUP_CONFIG="$cfg" LOCAL_BOOT_STASH="$stash" SKIP_ROOT_CHECK=1 bin/fsnapshot-preupgrade --dry-run
+  run env FBACKUP_CONFIG="$cfg" LOCAL_BOOT_STASH="$stash" FB_LOCK="$STUB_DIR/fb.lock" SKIP_ROOT_CHECK=1 bin/fsnapshot-preupgrade --dry-run
   # Check before teardown_stubs removes STUB_DIR (which would hide the bug).
   local stash_created=0
   [ -d "$stash" ] && stash_created=1
@@ -287,4 +287,36 @@ EOF
   [[ "$output" == *"[DRY-RUN] umount $STUB_DIR/top"* ]]
   # ...but the backup target was already mounted, so we must NOT unmount it.
   [[ "$output" != *"umount $STUB_DIR/backup"* ]]
+}
+
+@test "fbackup refuses to start when another run holds the lock" {
+  load helpers/stubs
+  setup_stubs
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  mkdir -p "$STUB_DIR/backup/host/subvols/root" "$STUB_DIR/backup/host/subvols/home" "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
+  for c in btrfs tar mount umount mkdir sync rpm zstd findmnt; do make_stub "$c"; done
+  lock="$STUB_DIR/fb.lock"
+  # Hold the lock in a background process while fbackup runs. The 2s hold must
+  # exceed the dry-run contender's runtime; the 0.3s pre-sleep lets the holder
+  # acquire the lock before the contender starts.
+  flock -x "$lock" -c 'sleep 2' &
+  holder=$!
+  sleep 0.3
+  run env DRY_RUN=1 FB_LOCK="$lock" FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
+  wait "$holder" 2>/dev/null || true
+  teardown_stubs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"another fbackup"* ]]
 }
