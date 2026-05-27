@@ -23,3 +23,15 @@ select_parent() {
     <(printf '%s\n' "$target_list" | grep -E "$re" | sort) |
     tail -n1
 }
+
+# prune_candidates <keep_n> <list>
+# list = newline-separated basenames. Prints regular snapshots to delete
+# (everything older than the newest keep_n), oldest first. Never preupgrade.
+prune_candidates() {
+  local keep="$1" list="$2"
+  printf '%s\n' "$list" |
+    grep -E '^[^.]+\.[0-9]{8}T[0-9]{6}Z$' |
+    sort -r |
+    tail -n "+$((keep + 1))" |
+    sort
+}
