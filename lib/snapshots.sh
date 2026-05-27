@@ -35,3 +35,37 @@ prune_candidates() {
     tail -n "+$((keep + 1))" |
     sort
 }
+
+# fb_snapshot <src_subvol_path> <dest_snapshot_path> : read-only snapshot.
+fb_snapshot() {
+  run btrfs subvolume snapshot -r "$1" "$2"
+}
+
+# fb_send_receive <snap_dir> <new_name> <parent_name|""> <target_subvol_dir>
+# Streams a (possibly incremental) snapshot to the target. On failure, removes
+# the partially received subvolume so it cannot be chosen as a future parent.
+fb_send_receive() {
+  local snap_dir="$1" new="$2" parent="$3" target="$4"
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    if [[ -n "$parent" ]]; then
+      printf '[DRY-RUN] btrfs send -p %s %s | btrfs receive %s\n' \
+        "$snap_dir/$parent" "$snap_dir/$new" "$target" >&2
+    else
+      printf '[DRY-RUN] btrfs send %s | btrfs receive %s\n' \
+        "$snap_dir/$new" "$target" >&2
+    fi
+    return 0
+  fi
+
+  local ok=1
+  if [[ -n "$parent" ]]; then
+    btrfs send -p "$snap_dir/$parent" "$snap_dir/$new" | btrfs receive "$target" || ok=0
+  else
+    btrfs send "$snap_dir/$new" | btrfs receive "$target" || ok=0
+  fi
+
+  if [[ "$ok" -ne 1 ]]; then
+    btrfs subvolume delete "$target/$new" >/dev/null 2>&1 || true
+    die "send/receive failed for $new (cleaned up partial target)"
+  fi
+}
