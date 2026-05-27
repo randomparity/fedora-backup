@@ -26,7 +26,6 @@
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs
-  for c in btrfs tar mount umount mkdir sync findmnt rpm zstd; do make_stub "$c"; done
   cfg="$STUB_DIR/backup.conf"
   cat >"$cfg" <<EOF
 BACKUP_DEV=/dev/x
@@ -40,10 +39,13 @@ EFI_MNT=/boot/efi
 RETENTION_KEEP=3
 HOSTNAME_TAG=host
 EOF
-  mkdir -p "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
+  mkdir -p "$STUB_DIR/backup/host/subvols/root" "$STUB_DIR/backup/host/subvols/home" "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
+  for c in btrfs tar mount umount mkdir sync findmnt rpm zstd; do make_stub "$c"; done
   run env DRY_RUN=1 FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
   teardown_stubs
   [ "$status" -eq 0 ]
   [[ "$output" == *"[DRY-RUN] btrfs send"* ]]
   [[ "$output" == *"receive"* ]]
+  [[ "$output" == *"[DRY-RUN] umount $STUB_DIR/top"* ]]
+  [[ "$output" == *"[DRY-RUN] umount $STUB_DIR/backup"* ]]
 }

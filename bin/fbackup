@@ -32,7 +32,7 @@ list_snaps() {
 }
 
 backup_subvol() {
-  local subvol="$1" ts="$2" snap_dir="$3" target_base="$4" force_full="$5"
+  local subvol="$1" ts="$2" snapshots_dir="$3" target_base="$4" force_full="$5"
   local name
   if [[ -n "$PREUPGRADE_TAG" ]]; then
     name="$subvol.$PREUPGRADE_TAG.$ts"
@@ -40,16 +40,16 @@ backup_subvol() {
     name="$subvol.$ts"
   fi
 
-  fb_snapshot "$SRC_TOPLEVEL_MNT/$subvol" "$snap_dir/$name" >&2
+  fb_snapshot "$SRC_TOPLEVEL_MNT/$subvol" "$snapshots_dir/$name" >&2
 
   local parent=""
   if [[ "$force_full" != "1" ]]; then
     parent="$(select_parent "$subvol" \
-      "$(list_snaps "$snap_dir" "$subvol")" \
+      "$(list_snaps "$snapshots_dir" "$subvol")" \
       "$(list_snaps "$target_base/subvols/$subvol" "$subvol")")"
   fi
 
-  fb_send_receive "$snap_dir" "$name" "$parent" "$target_base/subvols/$subvol" >&2
+  fb_send_receive "$snapshots_dir" "$name" "$parent" "$target_base/subvols/$subvol" >&2
   printf '%s' "$parent"
 }
 
@@ -79,6 +79,13 @@ prune_side() {
   done < <(prune_candidates "$RETENTION_KEEP" "$(list_snaps "$dir" "$subvol")")
 }
 
+# cleanup : unmount what we mounted, on success or failure. Idempotent.
+cleanup() {
+  findmnt -rno TARGET "$SRC_TOPLEVEL_MNT" >/dev/null 2>&1 && { run umount "$SRC_TOPLEVEL_MNT" || true; }
+  findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1 && { run umount "$BACKUP_MNT" || true; }
+  return 0
+}
+
 main() {
   local force_full=0 arg
   for arg in "$@"; do
@@ -97,29 +104,42 @@ main() {
   [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
   load_config "$CONFIG"
 
-  local ts snap_dir target_base
+  local ts snapshots_dir target_base
   ts="$(snap_timestamp)"
-  # shellcheck disable=SC2153  # SNAP_DIR is set dynamically by load_config
-  snap_dir="$SRC_TOPLEVEL_MNT/$SNAP_DIR"
+  # shellcheck disable=SC2153  # SNAP_DIR comes from load_config; the lowercase
+  # match is the unrelated 'snap_dir' local in the sourced lib/snapshots.sh.
+  snapshots_dir="$SRC_TOPLEVEL_MNT/$SNAP_DIR"
   target_base="$BACKUP_MNT/$HOSTNAME_TAG"
 
   run mkdir -p "$SRC_TOPLEVEL_MNT" "$BACKUP_MNT"
-  run mount "$BACKUP_DEV" "$BACKUP_MNT"
+  trap cleanup EXIT
+  findmnt -rno TARGET "$BACKUP_MNT" >/dev/null 2>&1 || run mount "$BACKUP_DEV" "$BACKUP_MNT"
+
+  [[ -d "$target_base/subvols" ]] ||
+    die "backup target not initialized at $target_base; run fbackup-init first"
+
   local root_src
   root_src="$(findmnt -no SOURCE / | sed 's/\[.*\]//')"
-  run mount -o subvolid=5 "$root_src" "$SRC_TOPLEVEL_MNT"
-  run mkdir -p "$snap_dir"
+  findmnt -rno TARGET "$SRC_TOPLEVEL_MNT" >/dev/null 2>&1 ||
+    run mount -o subvolid=5 "$root_src" "$SRC_TOPLEVEL_MNT"
+  run mkdir -p "$snapshots_dir"
 
-  local subvol parent_used=""
+  local subvol parent parents=()
   for subvol in "${SUBVOLS[@]}"; do
-    parent_used="$(backup_subvol "$subvol" "$ts" "$snap_dir" "$target_base" "$force_full")"
+    parent="$(backup_subvol "$subvol" "$ts" "$snapshots_dir" "$target_base" "$force_full")"
+    parents+=("$subvol=$parent")
   done
+  local parent_summary="${parents[*]}"
 
   archive_boot "$target_base" "$ts"
 
-  local manifest
-  manifest="$(build_manifest_json "$ts" "$parent_used" \
-    "$(. /etc/os-release && printf '%s' "$VERSION_ID")" "$HOSTNAME_TAG" \
+  local fedora_ver manifest
+  fedora_ver="$(
+    . /etc/os-release 2>/dev/null || true
+    printf '%s' "${VERSION_ID:-unknown}"
+  )"
+  manifest="$(build_manifest_json "$ts" "$parent_summary" \
+    "$fedora_ver" "$HOSTNAME_TAG" \
     "$(cat /etc/fstab 2>/dev/null || true)" \
     "$(btrfs subvolume list "$SRC_TOPLEVEL_MNT" 2>/dev/null || true)" \
     "$(btrfs filesystem show 2>/dev/null || true)" \
@@ -132,13 +152,12 @@ main() {
 
   if [[ -z "$PREUPGRADE_TAG" ]]; then
     for subvol in "${SUBVOLS[@]}"; do
-      prune_side "$snap_dir" "$subvol"
+      prune_side "$snapshots_dir" "$subvol"
       prune_side "$target_base/subvols/$subvol" "$subvol"
     done
   fi
 
   run sync
-  run umount "$BACKUP_MNT"
   log_info "Backup complete: timestamp $ts"
 }
 
