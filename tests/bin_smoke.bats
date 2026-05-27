@@ -215,6 +215,34 @@ EOF
   [ "$has_umount" -eq 1 ]
 }
 
+@test "frestore --apply refuses when a leftover received snapshot exists" {
+  load helpers/stubs
+  setup_stubs
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  mkdir -p "$STUB_DIR/dest/root.20260527T143000Z"
+  for c in btrfs tar mount umount mkdir findmnt; do make_stub "$c"; done
+  run env FBACKUP_CONFIG="$cfg" DEST_TOPLEVEL="$STUB_DIR/dest" SKIP_ROOT_CHECK=1 \
+    bin/frestore --apply --snapshot root.20260527T143000Z
+  log="$STUB_LOG"
+  has_send=0; grep -q "btrfs send" "$log" && has_send=1
+  teardown_stubs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"leftover from a previous run"* ]]
+  [ "$has_send" -eq 0 ]
+}
+
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs
