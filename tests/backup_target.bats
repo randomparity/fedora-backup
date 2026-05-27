@@ -47,9 +47,11 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "target_format builds a labeled mkfs.btrfs command" {
+@test "target_format builds a labeled mkfs.btrfs command without whole-device TRIM" {
   make_stub mkfs.btrfs
   run target_format /dev/x fedora-backup
   [ "$status" -eq 0 ]
-  grep -q "mkfs.btrfs -f -L fedora-backup /dev/x" "$STUB_LOG"
+  # -K skips the full-device TRIM, which wedges flaky USB/UAS bridges (e.g. the
+  # SanDisk PRO-G40, which drops to 0 capacity mid-discard).
+  grep -q "mkfs.btrfs -f -K -L fedora-backup /dev/x" "$STUB_LOG"
 }
