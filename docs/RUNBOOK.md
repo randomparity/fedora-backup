@@ -14,8 +14,17 @@ ls -l /dev/disk/by-id | grep -i sandisk
 btrfs filesystem show /
 # Prepare the target (ERASES the USB):
 sudo ./bin/fbackup-init
+# fbackup-init refuses a device that already holds a filesystem. A new USB is
+# usually pre-formatted, so if it aborts with "already contains a filesystem",
+# re-run with FORCE=1 to wipe it (you are still asked to type FORMAT):
+sudo FORCE=1 ./bin/fbackup-init
 sudo dnf5 install -y bats   # only needed to run the test suite
 ```
+
+`fbackup-init` unmounts the target when it finishes. `fbackup --dry-run` does
+not mount the target, so a preview against an unmounted target prints a "not
+initialized" warning and shows the plan only — that is expected; a real
+`fbackup` mounts the target and writes to it.
 
 ## 1. Back up
 
@@ -37,7 +46,8 @@ sudo ./bin/fupgrade snapshot    # pre-upgrade rollback anchor + local /boot stas
 sudo ./bin/fupgrade download    # installs plugin, stages F44; resolve conflicts here
 sudo ./bin/fupgrade apply       # reboots into the offline upgrade
 # ... system installs F44 and reboots into it ...
-sudo ./bin/fupgrade post        # health checks; then optional dnf5 autoremove
+sudo ./bin/fupgrade post        # post-upgrade health check (runs dnf5 check)
+sudo dnf5 autoremove            # optional, manual: reclaim space after upgrade
 ```
 
 ## 3. Roll back
@@ -79,9 +89,14 @@ upgrade. Roll it back only if you specifically need the pre-upgrade home.
    sudo ./bin/frestore --snapshot root.<ts> --boot-dir /mnt/newboot --efi-dir /mnt/newefi          # dry-run
    sudo ./bin/frestore --snapshot root.<ts> --boot-dir /mnt/newboot --efi-dir /mnt/newefi --apply
    ```
-3. frestore receives every configured subvolume and creates the canonical
-   writable subvols automatically. Remaining manual steps: rewrite /etc/fstab
-   UUIDs from the manifest, reinstall the bootloader, regenerate initramfs.
+3. frestore first verifies that every configured subvolume (and any
+   `--boot-dir`/`--efi-dir` archive) for `<ts>` exists on the target, then
+   receives them and creates the canonical writable subvols automatically. If
+   that timestamp's backup is incomplete it refuses up front (pick a `<ts>`
+   that has every subvol); if a later step fails it rolls back the subvolumes
+   it created, so a retry starts clean. Remaining manual steps: rewrite
+   /etc/fstab UUIDs from the manifest, reinstall the bootloader, regenerate
+   initramfs.
 
 ## Notes
 

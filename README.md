@@ -23,9 +23,9 @@ See [docs/RUNBOOK.md](docs/RUNBOOK.md). Start by copying
 ## Development
 
 ```bash
-sudo dnf5 install -y bats
-bats tests/                 # unit + command-construction tests
-prek run --all-files        # shellcheck + shfmt + bats
+sudo dnf5 install -y bats ShellCheck shfmt
+bats tests/                 # unit + command-construction tests (runs shellcheck on bin/)
+shfmt -d bin/ lib/          # formatting check
 ```
 
 Integration tests touch real loopback btrfs filesystems and need root:
