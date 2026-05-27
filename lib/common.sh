@@ -27,3 +27,26 @@ fi
 require_root() {
   [[ "$(id -u)" -eq 0 ]] || die "must run as root (try: sudo $0 ...)"
 }
+
+# confirm_phrase <expected> [prompt] : read a line from stdin; succeed only on exact match.
+confirm_phrase() {
+  local expected="$1" answer
+  local prompt="${2:-}"
+  [[ -n "$prompt" ]] || prompt="Type '$expected' to continue: "
+  read -r -p "$prompt" answer || true
+  [[ "$answer" == "$expected" ]]
+}
+
+# load_config <path> : source config and validate required variables.
+load_config() {
+  local cfg="$1" var
+  [[ -f "$cfg" ]] || die "config not found: $cfg"
+  # shellcheck source=/dev/null
+  source "$cfg"
+  for var in BACKUP_DEV BACKUP_LABEL BACKUP_MNT SRC_TOPLEVEL_MNT SNAP_DIR \
+    BOOT_MNT EFI_MNT RETENTION_KEEP; do
+    [[ -n "${!var:-}" ]] || die "config missing required variable: $var"
+  done
+  [[ "${#SUBVOLS[@]}" -gt 0 ]] || die "config missing required variable: SUBVOLS"
+  : "${HOSTNAME_TAG:=$(hostname)}"
+}
