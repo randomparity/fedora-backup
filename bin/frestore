@@ -11,20 +11,30 @@ source "$REPO_DIR/lib/restore.sh"
 CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
 DEST_TOPLEVEL="${DEST_TOPLEVEL:-/mnt/restore-target}"
 SNAPSHOT=""
+BOOT_DIR=""
+EFI_DIR=""
 
 # Populated by load_config; declared here so shellcheck tracks them as globals.
-BACKUP_DEV="" BACKUP_MNT="" HOSTNAME_TAG="" BOOT_MNT="" EFI_MNT=""
+BACKUP_DEV="" BACKUP_MNT="" HOSTNAME_TAG=""
 
 usage() {
   cat <<'EOF'
-Usage: frestore --snapshot <root.TIMESTAMP> [--config PATH] [--apply]
+Usage: frestore --snapshot <root.TIMESTAMP> [--apply] [--config PATH]
+                [--boot-dir DIR] [--efi-dir DIR]
 
 Disaster recovery from the USB target. Run from a Fedora live/rescue
 environment. Without --apply this performs a DRY-RUN and changes nothing.
 
-Automated:   receive root (and matching home) snapshots, extract /boot + /efi.
-Guided only: fstab UUID rewrite and bootloader reinstall are PRINTED for you
-to perform, because they depend on the new disk's UUIDs and UEFI layout.
+Receives every configured subvolume for the given timestamp onto DEST_TOPLEVEL
+(default /mnt/restore-target; override with the DEST_TOPLEVEL env var) and
+creates the canonical writable subvolumes.
+
+  --boot-dir DIR  extract boot.<ts>.tar.zst into DIR (mount the RECOVERY disk's
+                  /boot there first). Omit to skip and get a printed command.
+  --efi-dir DIR   extract efi.<ts>.tar.zst into DIR (the recovery ESP mount).
+
+Guided only (printed): /etc/fstab UUID rewrite and bootloader reinstall, which
+depend on the new disk's UUIDs and UEFI layout.
 EOF
 }
 
@@ -48,6 +58,22 @@ main() {
         SNAPSHOT="${1#--snapshot=}"
         shift
         ;;
+      --boot-dir)
+        BOOT_DIR="${2:-}"
+        shift 2
+        ;;
+      --boot-dir=*)
+        BOOT_DIR="${1#--boot-dir=}"
+        shift
+        ;;
+      --efi-dir)
+        EFI_DIR="${2:-}"
+        shift 2
+        ;;
+      --efi-dir=*)
+        EFI_DIR="${1#--efi-dir=}"
+        shift
+        ;;
       --config)
         CONFIG="${2:-}"
         shift 2
@@ -61,35 +87,50 @@ main() {
   done
 
   [[ -n "$SNAPSHOT" ]] || die "missing --snapshot <root.TIMESTAMP>"
+  [[ "$SNAPSHOT" == root.* ]] || die "snapshot must be the root snapshot, e.g. root.<TIMESTAMP>"
   [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
   load_config "$CONFIG"
 
-  local base ts home_snap
+  local base ts subvol snap
   base="$BACKUP_MNT/$HOSTNAME_TAG"
   ts="${SNAPSHOT#root.}"
-  home_snap="home.$ts"
 
   run mkdir -p "$BACKUP_MNT" "$DEST_TOPLEVEL"
   run mount "$BACKUP_DEV" "$BACKUP_MNT"
 
-  log_info "Receiving $SNAPSHOT and $home_snap onto $DEST_TOPLEVEL"
-  restore_receive "$base/subvols/root" "$SNAPSHOT" "$DEST_TOPLEVEL"
-  restore_receive "$base/subvols/home" "$home_snap" "$DEST_TOPLEVEL"
+  for subvol in "${SUBVOLS[@]}"; do
+    snap="$subvol.$ts"
+    log_info "Receiving $snap onto $DEST_TOPLEVEL"
+    restore_receive "$base/subvols/$subvol" "$snap" "$DEST_TOPLEVEL"
+    restore_canonicalize "$DEST_TOPLEVEL" "$snap" "$subvol"
+  done
 
-  log_info "Extracting boot archives (mount your new /boot and /boot/efi first)"
-  restore_boot "$base/boot/boot.$ts.tar.zst" "$BOOT_MNT"
-  restore_boot "$base/boot/efi.$ts.tar.zst" "$EFI_MNT"
+  if [[ -n "$BOOT_DIR" ]]; then
+    log_info "Extracting /boot into $BOOT_DIR"
+    restore_boot "$base/boot/boot.$ts.tar.zst" "$BOOT_DIR"
+  else
+    log_warn "no --boot-dir: skipping /boot extraction. To restore boot later:"
+    printf '  tar --xattrs --acls -xpf %s -C <recovery-boot-mount>\n' \
+      "$base/boot/boot.$ts.tar.zst" >&2
+  fi
+
+  if [[ -n "$EFI_DIR" ]]; then
+    log_info "Extracting /boot/efi into $EFI_DIR"
+    restore_boot "$base/boot/efi.$ts.tar.zst" "$EFI_DIR"
+  else
+    log_warn "no --efi-dir: skipping /boot/efi extraction. To restore later:"
+    printf '  tar --xattrs --acls -xpf %s -C <recovery-efi-mount>\n' \
+      "$base/boot/efi.$ts.tar.zst" >&2
+  fi
 
   run umount "$BACKUP_MNT"
 
-  cat >&2 <<'EOF'
+  cat >&2 <<EOF
 
-NEXT (manual, see docs/RUNBOOK.md):
-  1. Snapshot the received read-only subvols to canonical names:
-       btrfs subvolume snapshot DEST/root.<ts>  DEST/root
-       btrfs subvolume snapshot DEST/home.<ts>  DEST/home
-  2. Rewrite /etc/fstab UUIDs to the new filesystems (use manifest as reference).
-  3. Reinstall the bootloader and regenerate initramfs:
+Received subvolumes were snapshotted to canonical names under $DEST_TOPLEVEL.
+NEXT (manual, see docs/RUNBOOK.md) — depends on the new disk's UUIDs/UEFI:
+  1. Rewrite /etc/fstab UUIDs to the new filesystems (use the manifest).
+  2. Reinstall the bootloader and regenerate initramfs:
        grub2-mkconfig -o /boot/grub2/grub.cfg
        (UEFI: ensure the EFI entry points at the new ESP)
 EOF

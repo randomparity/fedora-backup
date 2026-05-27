@@ -65,7 +65,7 @@
   [ "$status" -eq 0 ]
 }
 
-@test "frestore defaults to dry-run without --apply" {
+@test "frestore dry-run receives all subvols and canonicalizes, skips boot without --boot-dir" {
   load helpers/stubs
   setup_stubs
   for c in btrfs tar mount umount mkdir findmnt; do make_stub "$c"; done
@@ -85,7 +85,36 @@ EOF
   run env FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/frestore --snapshot root.20260527T143000Z
   teardown_stubs
   [ "$status" -eq 0 ]
-  [[ "$output" == *"[DRY-RUN]"* ]]
+  [[ "$output" == *"[DRY-RUN] btrfs send $STUB_DIR/backup/host/subvols/root/root.20260527T143000Z"* ]]
+  [[ "$output" == *"[DRY-RUN] btrfs send $STUB_DIR/backup/host/subvols/home/home.20260527T143000Z"* ]]
+  [[ "$output" == *"[DRY-RUN] btrfs subvolume snapshot"* ]]
+  # No --boot-dir: must NOT extract into the live /boot
+  [[ "$output" != *"-C /boot "* ]]
+}
+
+@test "frestore extracts boot archives only into the provided --boot-dir/--efi-dir" {
+  load helpers/stubs
+  setup_stubs
+  for c in btrfs tar mount umount mkdir findmnt; do make_stub "$c"; done
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  run env FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/frestore \
+    --snapshot root.20260527T143000Z --boot-dir "$STUB_DIR/nb" --efi-dir "$STUB_DIR/ne"
+  teardown_stubs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-C $STUB_DIR/nb"* ]]
+  [[ "$output" == *"-C $STUB_DIR/ne"* ]]
 }
 
 @test "fsnapshot-preupgrade --dry-run does not write the local stash" {
