@@ -36,3 +36,18 @@ teardown() { teardown_stubs; }
   [ "$status" -eq 0 ]
   grep -q "btrfs subvolume snapshot /mnt/restore-target/root.20260527T143000Z /mnt/restore-target/root" "$STUB_LOG"
 }
+
+@test "restore_receive deletes the partial target on receive failure" {
+  cat >"$STUB_DIR/btrfs" <<'EOF'
+#!/usr/bin/env bash
+printf 'btrfs %s\n' "$*" >>"$STUB_LOG"
+cat >/dev/null 2>&1 || true
+[[ "$1" == "receive" ]] && exit 1
+exit 0
+EOF
+  chmod +x "$STUB_DIR/btrfs"
+  run restore_receive /mnt/backup/host/subvols/root root.20260527T143000Z /mnt/restore-target
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"restore receive failed for root.20260527T143000Z (cleaned up partial /mnt/restore-target/root.20260527T143000Z)"* ]]
+  grep -q "btrfs subvolume delete /mnt/restore-target/root.20260527T143000Z" "$STUB_LOG"
+}
