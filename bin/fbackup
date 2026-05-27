@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=../lib/common.sh
+source "$REPO_DIR/lib/common.sh"
+# shellcheck source=../lib/snapshots.sh
+source "$REPO_DIR/lib/snapshots.sh"
+# shellcheck source=../lib/manifest.sh
+source "$REPO_DIR/lib/manifest.sh"
+
+CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
+PREUPGRADE_TAG=""
+
+usage() {
+  cat <<'EOF'
+Usage: fbackup [--config PATH] [--dry-run] [--preupgrade] [--full]
+
+Snapshot root+home, send/receive incrementally to the USB target, archive
+/boot and /boot/efi, write a manifest, and prune old snapshots.
+
+  --preupgrade  tag this snapshot set "preupgrade-f43" (exempt from pruning)
+  --full        force a full send (ignore any common parent)
+EOF
+}
+
+# list_snaps <dir> <subvol> : basenames of snapshots for a subvol in a directory.
+list_snaps() {
+  local dir="$1" subvol="$2"
+  find "$dir" -maxdepth 1 -name "$subvol.*" -printf '%f\n' 2>/dev/null | sort
+}
+
+backup_subvol() {
+  local subvol="$1" ts="$2" snap_dir="$3" target_base="$4" force_full="$5"
+  local name
+  if [[ -n "$PREUPGRADE_TAG" ]]; then
+    name="$subvol.$PREUPGRADE_TAG.$ts"
+  else
+    name="$subvol.$ts"
+  fi
+
+  fb_snapshot "$SRC_TOPLEVEL_MNT/$subvol" "$snap_dir/$name" >&2
+
+  local parent=""
+  if [[ "$force_full" != "1" ]]; then
+    parent="$(select_parent "$subvol" \
+      "$(list_snaps "$snap_dir" "$subvol")" \
+      "$(list_snaps "$target_base/subvols/$subvol" "$subvol")")"
+  fi
+
+  fb_send_receive "$snap_dir" "$name" "$parent" "$target_base/subvols/$subvol" >&2
+  printf '%s' "$parent"
+}
+
+# Helper kept tiny so DRY_RUN handling stays in one place.
+run_zstd_to() {
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    printf '[DRY-RUN] zstd > %s\n' "$1" >&2
+    cat >/dev/null
+    return 0
+  fi
+  zstd -q -o "$1"
+}
+
+archive_boot() {
+  local target_base="$1" ts="$2"
+  run tar --xattrs --acls -C "$BOOT_MNT" -cpf - . |
+    run_zstd_to "$target_base/boot/boot.$ts.tar.zst"
+  run tar --xattrs --acls -C "$EFI_MNT" -cpf - . |
+    run_zstd_to "$target_base/boot/efi.$ts.tar.zst"
+}
+
+prune_side() {
+  local dir="$1" subvol="$2" del
+  while IFS= read -r del; do
+    [[ -z "$del" ]] && continue
+    run btrfs subvolume delete "$dir/$del"
+  done < <(prune_candidates "$RETENTION_KEEP" "$(list_snaps "$dir" "$subvol")")
+}
+
+main() {
+  local force_full=0 arg
+  for arg in "$@"; do
+    case "$arg" in
+      --help | -h)
+        usage
+        return 0
+        ;;
+      --dry-run) export DRY_RUN=1 ;;
+      --preupgrade) PREUPGRADE_TAG="preupgrade-f43" ;;
+      --full) force_full=1 ;;
+      --config=*) CONFIG="${arg#--config=}" ;;
+    esac
+  done
+
+  [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+  load_config "$CONFIG"
+
+  local ts snap_dir target_base
+  ts="$(snap_timestamp)"
+  # shellcheck disable=SC2153  # SNAP_DIR is set dynamically by load_config
+  snap_dir="$SRC_TOPLEVEL_MNT/$SNAP_DIR"
+  target_base="$BACKUP_MNT/$HOSTNAME_TAG"
+
+  run mkdir -p "$SRC_TOPLEVEL_MNT" "$BACKUP_MNT"
+  run mount "$BACKUP_DEV" "$BACKUP_MNT"
+  local root_src
+  root_src="$(findmnt -no SOURCE / | sed 's/\[.*\]//')"
+  run mount -o subvolid=5 "$root_src" "$SRC_TOPLEVEL_MNT"
+  run mkdir -p "$snap_dir"
+
+  local subvol parent_used=""
+  for subvol in "${SUBVOLS[@]}"; do
+    parent_used="$(backup_subvol "$subvol" "$ts" "$snap_dir" "$target_base" "$force_full")"
+  done
+
+  archive_boot "$target_base" "$ts"
+
+  local manifest
+  manifest="$(build_manifest_json "$ts" "$parent_used" \
+    "$(. /etc/os-release && printf '%s' "$VERSION_ID")" "$HOSTNAME_TAG" \
+    "$(cat /etc/fstab 2>/dev/null || true)" \
+    "$(btrfs subvolume list "$SRC_TOPLEVEL_MNT" 2>/dev/null || true)" \
+    "$(btrfs filesystem show 2>/dev/null || true)" \
+    "$(rpm -q kernel 2>/dev/null || true)")"
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    printf '[DRY-RUN] write manifest.%s.json\n' "$ts" >&2
+  else
+    printf '%s\n' "$manifest" >"$target_base/manifests/manifest.$ts.json"
+  fi
+
+  if [[ -z "$PREUPGRADE_TAG" ]]; then
+    for subvol in "${SUBVOLS[@]}"; do
+      prune_side "$snap_dir" "$subvol"
+      prune_side "$target_base/subvols/$subvol" "$subvol"
+    done
+  fi
+
+  run sync
+  run umount "$BACKUP_MNT"
+  log_info "Backup complete: timestamp $ts"
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
