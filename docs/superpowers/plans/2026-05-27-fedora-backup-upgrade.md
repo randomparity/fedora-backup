@@ -610,7 +610,7 @@ Expected: FAIL — `prune_candidates` undefined
 prune_candidates() {
   local keep="$1" list="$2"
   printf '%s\n' "$list" |
-    grep -E '\.[0-9]{8}T[0-9]{6}Z$' |
+    grep -E '^[^.]+\.[0-9]{8}T[0-9]{6}Z$' |
     sort -r |
     tail -n "+$((keep + 1))" |
     sort
