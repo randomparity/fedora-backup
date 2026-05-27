@@ -365,6 +365,43 @@ EOF
   [[ "$output" == *"[DRY-RUN] umount $STUB_DIR/backup"* ]]
 }
 
+@test "fbackup --dry-run previews the plan when the target is not yet initialized" {
+  load helpers/stubs
+  setup_stubs
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  # Deliberately do NOT create backup/host/subvols/* — that is the state
+  # fbackup-init leaves the target in (it unmounts on exit) and --dry-run does
+  # not mount, so the init check sees an empty mountpoint. A preview must still
+  # succeed and print the plan rather than dying.
+  for c in btrfs tar mount umount mkdir sync rpm zstd; do make_stub "$c"; done
+  cat >"$STUB_DIR/findmnt" <<'EOF'
+#!/usr/bin/env bash
+printf 'findmnt %s\n' "$*" >>"$STUB_LOG"
+for a in "$@"; do
+  [[ "$a" == "SOURCE" ]] && { echo /dev/sda2; exit 0; }
+done
+exit 1
+EOF
+  chmod +x "$STUB_DIR/findmnt"
+  run env DRY_RUN=1 FB_LOCK="$STUB_DIR/fb.lock" FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
+  teardown_stubs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not initialized"* ]]
+  [[ "$output" == *"[DRY-RUN] btrfs send"* ]]
+}
+
 @test "fbackup does not unmount a backup target it did not mount" {
   load helpers/stubs
   setup_stubs
