@@ -53,6 +53,41 @@
   [[ "$output" == *"unknown subcommand"* ]]
 }
 
+@test "frestore --help exits 0 and warns about live environment" {
+  run bin/frestore --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage"* ]]
+  [[ "$output" == *"live"* || "$output" == *"rescue"* ]]
+}
+
+@test "frestore is shellcheck-clean" {
+  run shellcheck -x bin/frestore
+  [ "$status" -eq 0 ]
+}
+
+@test "frestore defaults to dry-run without --apply" {
+  load helpers/stubs
+  setup_stubs
+  for c in btrfs tar mount umount mkdir findmnt; do make_stub "$c"; done
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  run env FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/frestore --snapshot root.20260527T143000Z
+  teardown_stubs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[DRY-RUN]"* ]]
+}
+
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs
