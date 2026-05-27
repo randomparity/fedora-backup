@@ -73,15 +73,15 @@ upgrade. Roll it back only if you specifically need the pre-upgrade home.
 1. Partition the new disk per the manifest (`fstab`, `fs_show`): EFI vfat,
    `/boot` ext4, btrfs root. Recreate the same btrfs topology, or consciously
    collapse a former multi-device filesystem to a single device.
-2. Mount the new btrfs top level at `/mnt/restore-target`, the new `/boot` and
-   `/boot/efi`, then:
+2. Mount the new btrfs top level at `/mnt/restore-target`, then:
    ```bash
-   sudo ./bin/frestore --snapshot root.<ts>           # dry-run first
-   sudo ./bin/frestore --snapshot root.<ts> --apply
+   # Mount the recovery disk's /boot and /boot/efi first, then:
+   sudo ./bin/frestore --snapshot root.<ts> --boot-dir /mnt/newboot --efi-dir /mnt/newefi          # dry-run
+   sudo ./bin/frestore --snapshot root.<ts> --boot-dir /mnt/newboot --efi-dir /mnt/newefi --apply
    ```
-3. Follow the printed NEXT steps: snapshot received subvols to canonical
-   `root`/`home`, rewrite `/etc/fstab` UUIDs from the manifest, reinstall the
-   bootloader, regenerate initramfs.
+3. frestore receives every configured subvolume and creates the canonical
+   writable subvols automatically. Remaining manual steps: rewrite /etc/fstab
+   UUIDs from the manifest, reinstall the bootloader, regenerate initramfs.
 
 ## Notes
 
