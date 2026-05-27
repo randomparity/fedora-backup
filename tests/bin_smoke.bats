@@ -23,6 +23,17 @@
   [ "$status" -eq 0 ]
 }
 
+@test "fsnapshot-preupgrade --help exits 0" {
+  run bin/fsnapshot-preupgrade --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Usage"* ]]
+}
+
+@test "fsnapshot-preupgrade is shellcheck-clean" {
+  run shellcheck -x bin/fsnapshot-preupgrade
+  [ "$status" -eq 0 ]
+}
+
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs

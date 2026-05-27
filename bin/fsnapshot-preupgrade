@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=../lib/common.sh
+source "$REPO_DIR/lib/common.sh"
+
+CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
+LOCAL_STASH="${LOCAL_BOOT_STASH:-/var/lib/fedora-backup/boot-stash}"
+
+usage() {
+  cat <<'EOF'
+Usage: fsnapshot-preupgrade [--config PATH] [--dry-run]
+
+Create the pre-upgrade rollback anchor: a tagged "preupgrade-f43" snapshot set
+on the USB target (via fbackup --preupgrade) plus a LOCAL copy of /boot and
+/boot/efi, so the F43 kernel survives a failed upgrade even without the USB.
+EOF
+}
+
+main() {
+  local passthru=() arg
+  for arg in "$@"; do
+    case "$arg" in
+      --help | -h)
+        usage
+        return 0
+        ;;
+      *) passthru+=("$arg") ;;
+    esac
+  done
+
+  [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+
+  log_info "Stashing /boot and /boot/efi locally to $LOCAL_STASH"
+  run mkdir -p "$LOCAL_STASH"
+  run tar --xattrs --acls -C /boot -cpf "$LOCAL_STASH/boot.tar" .
+  run tar --xattrs --acls -C /boot/efi -cpf "$LOCAL_STASH/efi.tar" .
+
+  log_info "Creating tagged preupgrade snapshot set on the USB target"
+  FBACKUP_CONFIG="$CONFIG" "$SCRIPT_DIR/fbackup" --preupgrade \
+    "${passthru[@]+"${passthru[@]}"}"
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
