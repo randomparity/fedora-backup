@@ -1,3 +1,4 @@
 etc/backup.conf
 *.tar.zst
 .DS_Store
+.worktrees/
