@@ -71,8 +71,8 @@ Target layout:
 
 **Manifest** (per backup) records what a restore needs: source filesystem
 UUIDs, `/etc/fstab`, full subvolume list, `btrfs filesystem show` topology,
-installed kernel list, Fedora version, and the parent snapshot used for the
-incremental.
+installed kernel list, Fedora version, and the per-subvolume parent snapshots
+used for the incrementals (recorded as a `subvol=parent` summary).
 
 **Safety:** config references the backup disk by `/dev/disk/by-id/...`, never
 `/dev/sdc`, so a device-letter reshuffle cannot misdirect a format command.
