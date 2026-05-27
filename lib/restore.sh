@@ -12,8 +12,10 @@ restore_receive() {
       "$target_dir/$snap" "$dest" >&2
     return 0
   fi
-  btrfs send "$target_dir/$snap" | btrfs receive "$dest" ||
-    die "restore receive failed for $snap"
+  if ! btrfs send "$target_dir/$snap" | btrfs receive "$dest"; then
+    btrfs subvolume delete "$dest/$snap" >/dev/null 2>&1 || true
+    die "restore receive failed for $snap (cleaned up partial $dest/$snap)"
+  fi
 }
 
 # restore_boot <tarball> <mountpoint> : extract a boot/efi archive, preserving metadata.

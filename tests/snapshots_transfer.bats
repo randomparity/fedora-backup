@@ -37,3 +37,34 @@ teardown() { teardown_stubs; }
   [ "$status" -ne 0 ]
   grep -q "btrfs subvolume delete /mnt/backup/host/subvols/root/root.20260527T143000Z" "$STUB_LOG"
 }
+
+@test "fb_send_receive reports removed partial target when delete succeeds" {
+  cat >"$STUB_DIR/btrfs" <<'EOF'
+#!/usr/bin/env bash
+printf 'btrfs %s\n' "$*" >>"$STUB_LOG"
+cat >/dev/null 2>&1 || true
+[[ "$1" == "receive" ]] && exit 1
+exit 0
+EOF
+  chmod +x "$STUB_DIR/btrfs"
+  run fb_send_receive /snaps root.20260527T143000Z "" /mnt/backup/host/subvols/root
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"removed partial target /mnt/backup/host/subvols/root/root.20260527T143000Z"* ]]
+  grep -q "btrfs subvolume delete /mnt/backup/host/subvols/root/root.20260527T143000Z" "$STUB_LOG"
+}
+
+@test "fb_send_receive demands manual cleanup when delete also fails" {
+  cat >"$STUB_DIR/btrfs" <<'EOF'
+#!/usr/bin/env bash
+printf 'btrfs %s\n' "$*" >>"$STUB_LOG"
+cat >/dev/null 2>&1 || true
+[[ "$1" == "receive" ]] && exit 1
+[[ "$1 $2" == "subvolume delete" ]] && exit 1
+exit 0
+EOF
+  chmod +x "$STUB_DIR/btrfs"
+  run fb_send_receive /snaps root.20260527T143000Z "" /mnt/backup/host/subvols/root
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"MANUAL CLEANUP REQUIRED"* ]]
+  [[ "$output" == *"btrfs subvolume delete /mnt/backup/host/subvols/root/root.20260527T143000Z"* ]]
+}

@@ -67,7 +67,10 @@ fb_send_receive() {
   fi
 
   if [[ "$ok" -ne 1 ]]; then
-    btrfs subvolume delete "$target/$new" >/dev/null 2>&1 || true
-    die "send/receive failed for $new (cleaned up partial target)"
+    if btrfs subvolume delete "$target/$new" >/dev/null 2>&1; then
+      die "send/receive failed for $new (removed partial target $target/$new)"
+    fi
+    log_error "send/receive failed for $new and the partial target could not be removed"
+    die "MANUAL CLEANUP REQUIRED: run 'btrfs subvolume delete $target/$new' before the next backup"
   fi
 }
