@@ -112,10 +112,12 @@ main() {
 
   [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
 
-  local lock="${FB_LOCK:-/run/fedora-backup.lock}"
-  : >"$lock" 2>/dev/null || die "cannot write lock file $lock (need root?)"
-  exec 9>"$lock"
-  flock -n 9 || die "another fbackup run holds $lock; aborting"
+  if [[ "${DRY_RUN:-0}" != "1" ]]; then
+    local lock="${FB_LOCK:-/run/fedora-backup.lock}"
+    : >"$lock" 2>/dev/null || die "cannot write lock file $lock (need root?)"
+    exec 9>"$lock"
+    flock -n 9 || die "another fbackup run holds $lock; aborting"
+  fi
 
   load_config "$CONFIG"
 

@@ -181,6 +181,10 @@ EOF
 @test "frestore --apply cleans the partial target and unmounts on receive failure" {
   load helpers/stubs
   setup_stubs
+  # Real source snapshots so the new source pre-check passes and we still
+  # exercise restore_receive's own partial cleanup. Must precede make_stub.
+  mkdir -p "$STUB_DIR/backup/host/subvols/root/root.20260527T143000Z" \
+    "$STUB_DIR/backup/host/subvols/home/home.20260527T143000Z"
   for c in tar mount umount mkdir; do make_stub "$c"; done
   make_stub findmnt 1
   cat >"$STUB_DIR/btrfs" <<'EOF'
@@ -241,6 +245,88 @@ EOF
   [ "$status" -ne 0 ]
   [[ "$output" == *"leftover from a previous run"* ]]
   [ "$has_send" -eq 0 ]
+}
+
+@test "frestore --apply refuses up front when a source snapshot is missing" {
+  load helpers/stubs
+  setup_stubs
+  # Only root has a source snapshot; home is missing (e.g. a past fbackup
+  # aborted mid-loop). Must precede make_stub (mkdir gets stubbed).
+  mkdir -p "$STUB_DIR/backup/host/subvols/root/root.20260527T143000Z"
+  for c in btrfs tar mount umount mkdir; do make_stub "$c"; done
+  make_stub findmnt 1
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  run env FBACKUP_CONFIG="$cfg" DEST_TOPLEVEL="$STUB_DIR/dest" SKIP_ROOT_CHECK=1 \
+    bin/frestore --apply --snapshot root.20260527T143000Z
+  log="$STUB_LOG"
+  has_send=0
+  grep -q "btrfs send" "$log" && has_send=1
+  teardown_stubs
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"source snapshot not found"* ]]
+  [ "$has_send" -eq 0 ]
+}
+
+@test "frestore --apply rolls back completed subvolumes when a later subvolume fails" {
+  load helpers/stubs
+  setup_stubs
+  # Both sources present so the pre-check passes; the counter btrfs stub then
+  # fails the SECOND receive (home) after root has fully completed.
+  mkdir -p "$STUB_DIR/backup/host/subvols/root/root.20260527T143000Z" \
+    "$STUB_DIR/backup/host/subvols/home/home.20260527T143000Z"
+  for c in tar mount umount mkdir; do make_stub "$c"; done
+  make_stub findmnt 1
+  cat >"$STUB_DIR/btrfs" <<'EOF'
+#!/usr/bin/env bash
+printf 'btrfs %s\n' "$*" >>"$STUB_LOG"
+cat >/dev/null 2>&1 || true
+if [[ "$1" == "receive" ]]; then
+  n=$(( $(cat "$STUB_DIR/recv_n" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" >"$STUB_DIR/recv_n"
+  [[ "$n" -ge 2 ]] && exit 1
+fi
+exit 0
+EOF
+  chmod +x "$STUB_DIR/btrfs"
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  run env FBACKUP_CONFIG="$cfg" DEST_TOPLEVEL="$STUB_DIR/dest" SKIP_ROOT_CHECK=1 \
+    bin/frestore --apply --snapshot root.20260527T143000Z
+  log="$STUB_LOG"
+  has_root_canon_delete=0
+  grep -q "btrfs subvolume delete $STUB_DIR/dest/root$" "$log" && has_root_canon_delete=1
+  has_root_snap_delete=0
+  grep -q "btrfs subvolume delete $STUB_DIR/dest/root.20260527T143000Z$" "$log" && has_root_snap_delete=1
+  has_umount=0
+  grep -q "umount $STUB_DIR/backup" "$log" && has_umount=1
+  teardown_stubs
+  [ "$status" -ne 0 ]
+  [ "$has_root_canon_delete" -eq 1 ]
+  [ "$has_root_snap_delete" -eq 1 ]
+  [ "$has_umount" -eq 1 ]
 }
 
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
@@ -342,9 +428,49 @@ EOF
   flock -x "$lock" -c 'sleep 2' &
   holder=$!
   sleep 0.3
-  run env DRY_RUN=1 FB_LOCK="$lock" FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
+  run env FB_LOCK="$lock" FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
   wait "$holder" 2>/dev/null || true
   teardown_stubs
   [ "$status" -ne 0 ]
   [[ "$output" == *"another fbackup"* ]]
+}
+
+@test "fbackup --dry-run ignores the held lock" {
+  load helpers/stubs
+  setup_stubs
+  cfg="$STUB_DIR/backup.conf"
+  cat >"$cfg" <<EOF
+BACKUP_DEV=/dev/x
+BACKUP_LABEL=fedora-backup
+BACKUP_MNT=$STUB_DIR/backup
+SRC_TOPLEVEL_MNT=$STUB_DIR/top
+SUBVOLS=(root home)
+SNAP_DIR=_snapshots
+BOOT_MNT=/boot
+EFI_MNT=/boot/efi
+RETENTION_KEEP=3
+HOSTNAME_TAG=host
+EOF
+  mkdir -p "$STUB_DIR/backup/host/subvols/root" "$STUB_DIR/backup/host/subvols/home" "$STUB_DIR/backup/host/manifests" "$STUB_DIR/top/_snapshots"
+  for c in btrfs tar mount umount mkdir sync rpm zstd; do make_stub "$c"; done
+  cat >"$STUB_DIR/findmnt" <<'EOF'
+#!/usr/bin/env bash
+printf 'findmnt %s\n' "$*" >>"$STUB_LOG"
+for a in "$@"; do
+  [[ "$a" == "SOURCE" ]] && { echo /dev/sda2; exit 0; }
+done
+exit 1
+EOF
+  chmod +x "$STUB_DIR/findmnt"
+  lock="$STUB_DIR/fb.lock"
+  # Hold the lock: a real backup would block here, but a dry-run preview must
+  # skip the lock entirely and still complete.
+  flock -x "$lock" -c 'sleep 2' &
+  holder=$!
+  sleep 0.3
+  run env DRY_RUN=1 FB_LOCK="$lock" FBACKUP_CONFIG="$cfg" SKIP_ROOT_CHECK=1 bin/fbackup
+  wait "$holder" 2>/dev/null || true
+  teardown_stubs
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[DRY-RUN] btrfs send"* ]]
 }
