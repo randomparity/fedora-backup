@@ -34,6 +34,25 @@
   [ "$status" -eq 0 ]
 }
 
+@test "fupgrade --help lists subcommands" {
+  run bin/fupgrade --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"preflight"* ]]
+  [[ "$output" == *"download"* ]]
+  [[ "$output" == *"apply"* ]]
+}
+
+@test "fupgrade is shellcheck-clean" {
+  run shellcheck -x bin/fupgrade
+  [ "$status" -eq 0 ]
+}
+
+@test "fupgrade rejects an unknown subcommand" {
+  run bin/fupgrade frobnicate
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown subcommand"* ]]
+}
+
 @test "fbackup --dry-run plans snapshot, send/receive, tar, and manifest" {
   load helpers/stubs
   setup_stubs

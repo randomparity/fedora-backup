@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck source=../lib/common.sh
+source "$REPO_DIR/lib/common.sh"
+# shellcheck source=../lib/upgrade.sh
+source "$REPO_DIR/lib/upgrade.sh"
+
+CONFIG="${FBACKUP_CONFIG:-$REPO_DIR/etc/backup.conf}"
+TARGET_RELEASE=44
+
+# Populated by load_config; declared here so shellcheck tracks them as globals.
+BACKUP_DEV="" BACKUP_MNT="" HOSTNAME_TAG=""
+
+usage() {
+  cat <<'EOF'
+Usage: fupgrade <subcommand> [--config PATH] [--dry-run]
+
+Drive the Fedora 43 -> 44 upgrade one boundary at a time:
+
+  preflight   verify a backup dated today exists and the system is healthy
+  refresh     fully patch the current F43 system (reboot afterwards if asked)
+  snapshot    create the pre-upgrade rollback anchor (fsnapshot-preupgrade)
+  download    install the plugin and stage the F44 transaction
+  apply       reboot into the offline upgrade
+  post        post-upgrade health checks
+EOF
+}
+
+main() {
+  local sub="${1:-}" arg
+  shift || true
+  for arg in "$@"; do
+    case "$arg" in
+      --dry-run) export DRY_RUN=1 ;;
+      --config=*) CONFIG="${arg#--config=}" ;;
+    esac
+  done
+
+  case "$sub" in
+    --help | -h | "")
+      usage
+      return 0
+      ;;
+    preflight)
+      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+      load_config "$CONFIG"
+      run mount "$BACKUP_DEV" "$BACKUP_MNT" 2>/dev/null || true
+      up_preflight "$BACKUP_MNT" "$HOSTNAME_TAG"
+      run umount "$BACKUP_MNT" 2>/dev/null || true
+      run dnf5 check
+      ;;
+    refresh)
+      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+      up_refresh
+      log_info "If the kernel changed, reboot before continuing."
+      ;;
+    snapshot)
+      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+      FBACKUP_CONFIG="$CONFIG" "$SCRIPT_DIR/fsnapshot-preupgrade"
+      ;;
+    download)
+      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+      up_download "$TARGET_RELEASE"
+      ;;
+    apply)
+      [[ "${SKIP_ROOT_CHECK:-0}" == "1" ]] || require_root
+      up_apply
+      ;;
+    post)
+      up_post
+      log_info "Verify: cat /etc/os-release (VERSION_ID=$TARGET_RELEASE), uname -r, desktop session."
+      ;;
+    *)
+      die "unknown subcommand: $sub (see --help)"
+      ;;
+  esac
+}
+
+[[ "${BASH_SOURCE[0]}" == "${0}" ]] && main "$@"
